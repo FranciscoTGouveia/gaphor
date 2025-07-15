@@ -148,9 +148,74 @@ class StyleEditor:
         color = widget.get_rgba()
         self.change_style("text-color", from_gdk_rgba(color))
 
+    def _extract_existing_properties(self, target_selector):
+        lines = self.style_sheet.styleSheet.split('\n')
+        for i, line in enumerate(lines):
+            if line.strip().startswith(target_selector) and '{' in line:
+                existing_properties = {}
+    
+                if line.strip().endswith('}'):
+                    content = line[line.find('{')+1:line.rfind('}')].strip()
+                    if content:
+                        for prop in content.split(';'):
+                            prop = prop.strip()
+                            if prop and ':' in prop:
+                                key, value = prop.split(':', 1)
+                                existing_properties[key.strip()] = value.strip()
+                else:
+                    for j in range(i + 1, len(lines)):
+                        line_content = lines[j].strip()
+                        if line_content == '}':
+                            break
+                        elif line_content and ':' in line_content:
+                            prop_line = line_content.rstrip(';')
+                            if ':' in prop_line:
+                                key, value = prop_line.split(':', 1)
+                                existing_properties[key.strip()] = value.strip()
+                
+                return existing_properties
+        
+        return None
+
+    def _replace_css_rule(self, target_selector, new_rule):
+        lines = self.style_sheet.styleSheet.split('\n')
+        for i, line in enumerate(lines):
+            if line.strip().startswith(target_selector) and '{' in line:
+                if line.strip().endswith('}'):
+                    rule_end_index = i
+                else:
+                    rule_end_index = i
+                    for j in range(i + 1, len(lines)):
+                        if lines[j].strip() == '}':
+                            rule_end_index = j
+                            break
+                
+                new_lines = (
+                    lines[:i] +
+                    [new_rule] +
+                    lines[rule_end_index + 1:]
+                )
+                return '\n'.join(new_lines)
+        
+        return self.style_sheet.styleSheet
+
     def on_export(self, _widget):
         with Transaction(self.event_manager):
-            self.style_sheet.styleSheet += f"\n{self.render_css()}\n"
+            name = getattr(self.subject.subject, "name", None)
+            tag = css_name(self.subject)
+            target_selector = f'{tag}[name="{name}"]' if name else tag
+            
+            existing_properties = self._extract_existing_properties(target_selector)
+            if existing_properties is not None:
+                merged_properties = {**existing_properties, **self.presentation_style}
+                
+                properties_str = "\n".join(f"  {k}: {v};" for k, v in merged_properties.items())
+                merged_rule = f"{target_selector} {{\n{properties_str}\n}}"
+                
+                self.style_sheet.styleSheet = self._replace_css_rule(target_selector, merged_rule)
+            else:
+                self.style_sheet.styleSheet += f"\n{self.render_css()}\n"
+                
         self.close()
 
     @event_handler(AttributeUpdated)
